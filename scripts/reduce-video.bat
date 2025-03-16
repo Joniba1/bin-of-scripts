@@ -4,9 +4,9 @@
 
 @echo off
 if "%~1"=="" (
-    echo Usage: reduce-video input_file
-    echo Input file path must be provided.
-    exit /b 1
+  echo Usage: reduce-video input_file
+  echo Input file path must be provided.
+  exit /b 1
 )
 
 set "INPUT_FILE=%~1"
@@ -15,7 +15,6 @@ set "FILE_NAME=%~n1"
 set "FILE_EXT=%~x1"
 
 set "OUTPUT_FILE=%FILE_DIR%%FILE_NAME%_reduced%FILE_EXT%"
-
 
 echo Processing...
 
