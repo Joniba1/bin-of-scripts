@@ -3,6 +3,7 @@
 :: Usage: reduce-video [video path]
 
 @echo off
+
 if "%~1"=="" (
   echo Usage: reduce-video input_file
   echo Input file path must be provided.
