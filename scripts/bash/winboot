@@ -1,0 +1,22 @@
+#!/bin/bash
+# Reboots directly from Ubuntu into Windows
+
+WINDOWS_ENTRY=$(sudo grep -i "menuentry 'Windows" /boot/grub/grub.cfg | head -1 | awk -F"'" '{print $2}')
+
+if [ -z "$WINDOWS_ENTRY" ]; then
+    echo "Error: Windows entry not found in GRUB."
+    return 1 2>/dev/null || true
+fi
+
+echo "Found Windows GRUB entry: $WINDOWS_ENTRY"
+
+read -p "Are you sure you want to reboot into Windows? [y/N]: " CONFIRM
+
+CONFIRM=${CONFIRM,,}
+
+if [[ "$CONFIRM" == "y" || "$CONFIRM" == "yes" ]]; then
+    echo "Rebooting into Windows..."
+    sudo grub-reboot "$WINDOWS_ENTRY" && sudo reboot
+else
+    echo "Cancelled. Staying in Ubuntu."
+fi
