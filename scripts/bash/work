@@ -5,6 +5,7 @@ set -euo pipefail
 BODY=""
 TITLE=""
 BASE=""
+POSITIONAL=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -21,14 +22,15 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
-      break
+      POSITIONAL+=("$1")
+      shift
       ;;
   esac
 done
 
-# If no -t flag was used, treat remaining args as the title
-if [ -z "$TITLE" ]; then
-  TITLE="$*"
+# If no -t flag was used, treat positional args as the title
+if [ -z "$TITLE" ] && [ ${#POSITIONAL[@]} -gt 0 ]; then
+  TITLE="${POSITIONAL[*]}"
 fi
 
 if [ -z "$TITLE" ]; then
@@ -56,7 +58,11 @@ BRANCH_NAME="${ISSUE_NUMBER}-${SLUG}"
 
 echo "Creating branch: $BRANCH_NAME"
 
-gh issue develop "$ISSUE_NUMBER" --name "$BRANCH_NAME" --checkout ${BASE:+--base "$BASE"}
+gh issue develop "$ISSUE_NUMBER" --name "$BRANCH_NAME" ${BASE:+--base "$BASE"}
+
+git fetch origin "$BRANCH_NAME"
+
+git checkout "$BRANCH_NAME"
 
 echo
 echo "✅ Ready to work"
