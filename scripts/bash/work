@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+BODY=""
+TITLE=""
+BASE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -b|--body)
+      BODY="$2"
+      shift 2
+      ;;
+    -t|--title)
+      TITLE="$2"
+      shift 2
+      ;;
+    --base)
+      BASE="$2"
+      shift 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# If no -t flag was used, treat remaining args as the title
+if [ -z "$TITLE" ]; then
+  TITLE="$*"
+fi
+
+if [ -z "$TITLE" ]; then
+  echo "Usage: work \"Issue title\""
+  echo "       work -t \"Issue title\" [-b \"Body\"] [--base \"base-branch\"]"
+  exit 1
+fi
+
+echo "Creating issue..."
+
+ISSUE_URL=$(gh issue create \
+  --title "$TITLE" \
+  --body "$BODY")
+
+ISSUE_NUMBER=$(basename "$ISSUE_URL")
+
+SLUG=$(
+  echo "$TITLE" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g' \
+    | sed -E 's/^-|-$//g'
+)
+
+BRANCH_NAME="${ISSUE_NUMBER}-${SLUG}"
+
+echo "Creating branch: $BRANCH_NAME"
+
+gh issue develop "$ISSUE_NUMBER" --name "$BRANCH_NAME" --checkout ${BASE:+--base "$BASE"}
+
+echo
+echo "✅ Ready to work"
+echo "Issue:  $ISSUE_URL"
+echo "Branch: $BRANCH_NAME"
