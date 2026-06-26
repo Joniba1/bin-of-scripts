@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+# Tab completion — activate by sourcing: `source merge`
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  _merge_completions() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local branches
+    branches=$(git branch -a 2>/dev/null | tr -d '\r' | sed 's|remotes/origin/||;s/^[* ]*//' | sort -u)
+    COMPREPLY=($(compgen -W "$branches" -- "$cur"))
+  }
+  complete -F _merge_completions merge
+  return 0
+fi
+
+set -euo pipefail
+
+FROM_BRANCH="${1:-}"
+TO_BRANCH="${2:-}"
+
+if [ -z "$FROM_BRANCH" ] || [ -z "$TO_BRANCH" ]; then
+  echo "Usage: merge <branch-to-merge-from> <branch-to-merge-to>"
+  exit 1
+fi
+
+ISSUE_NUMBER=$(echo "$FROM_BRANCH" | grep -oE '^[0-9]+' || true)
+if [ -n "$ISSUE_NUMBER" ]; then
+  ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --json state --jq '.state' 2>/dev/null || true)
+  if [ "$ISSUE_STATE" = "CLOSED" ]; then
+    echo "Error: Issue #$ISSUE_NUMBER is already closed."
+    exit 1
+  fi
+fi
+
+git fetch origin "$FROM_BRANCH" "$TO_BRANCH"
+
+UNPUSHED=$(git log "origin/$FROM_BRANCH..$FROM_BRANCH" --oneline 2>/dev/null | wc -l | tr -d '[:space:]')
+if [ "$UNPUSHED" -gt 0 ]; then
+  echo "Pushing $UNPUSHED unpushed commit(s) on '$FROM_BRANCH'..."
+  git push origin "$FROM_BRANCH"
+fi
+
+COMMIT_COUNT=$(git log "origin/$TO_BRANCH..origin/$FROM_BRANCH" --oneline | wc -l | tr -d '[:space:]')
+
+echo "Branch '$FROM_BRANCH' has $COMMIT_COUNT commit(s) ahead of '$TO_BRANCH'"
+
+EXISTING_PR=$(gh pr list --head "$FROM_BRANCH" --base "$TO_BRANCH" --json url --jq '.[0].url' 2>/dev/null || true)
+
+if [ -n "$EXISTING_PR" ]; then
+  echo "Using existing PR: $EXISTING_PR"
+  PR_URL="$EXISTING_PR"
+else
+  TITLE=$(echo "$FROM_BRANCH" | sed -E 's/^[0-9]+-//' | tr '-' ' ' | sed 's/\b./\u&/g')
+  echo "Creating PR: \"$TITLE\"..."
+  PR_URL=$(gh pr create \
+    --base "$TO_BRANCH" \
+    --head "$FROM_BRANCH" \
+    --title "$TITLE" \
+    --body "")
+fi
+
+if [ "$COMMIT_COUNT" -eq 1 ]; then
+  echo "Single commit — squash merging..."
+  gh pr merge "$PR_URL" --squash
+else
+  echo "$COMMIT_COUNT commits — merge commit..."
+  gh pr merge "$PR_URL" --merge
+fi
+
+git checkout "$TO_BRANCH"
+git pull origin "$TO_BRANCH"
+
+echo
+echo "✅ Done"
+echo "PR:     $PR_URL"
+echo "Merged: $FROM_BRANCH → $TO_BRANCH"
