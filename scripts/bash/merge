@@ -49,7 +49,12 @@ if [ -n "$EXISTING_PR" ]; then
   echo "Using existing PR: $EXISTING_PR"
   PR_URL="$EXISTING_PR"
 else
-  TITLE=$(echo "$FROM_BRANCH" | sed -E 's/^[0-9]+-//' | tr '-' ' ' | sed 's/./\u&/')
+  if [ -n "$ISSUE_NUMBER" ]; then
+    TITLE=$(gh issue view "$ISSUE_NUMBER" --json title --jq '.title' 2>/dev/null || true)
+  fi
+  if [ -z "$TITLE" ]; then
+    TITLE=$(echo "$FROM_BRANCH" | sed -E 's/^[0-9]+-//' | tr '-' ' ' | sed 's/./\u&/')
+  fi
   echo "Creating PR: \"$TITLE\"..."
   PR_URL=$(gh pr create \
     --base "$TO_BRANCH" \
