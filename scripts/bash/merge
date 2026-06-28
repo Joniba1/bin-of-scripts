@@ -85,6 +85,10 @@ fi
 git checkout "$TO_BRANCH"
 git pull origin "$TO_BRANCH"
 
+if [ -n "$ISSUE_NUMBER" ]; then
+  gh issue close "$ISSUE_NUMBER" --reason completed
+fi
+
 echo
 echo "✅ Done"
 echo "PR:     $PR_URL"
