@@ -39,6 +39,10 @@ if [ -z "$TITLE" ]; then
   exit 1
 fi
 
+if [ -z "$BASE" ]; then
+  BASE=$(git branch --show-current)
+fi
+
 echo "Creating issue..."
 
 ISSUE_URL=$(gh issue create \
