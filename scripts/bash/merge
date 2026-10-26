@@ -23,6 +23,19 @@ if [ -z "$FROM_BRANCH" ] || [ -z "$TO_BRANCH" ]; then
 fi
 
 ISSUE_NUMBER=$(echo "$FROM_BRANCH" | grep -oE '^[0-9]+' || true)
+
+# Branches are <prefix>/<issue-title-slug>, so find the open issue whose title slugs to the same name
+BRANCH_SLUG="${FROM_BRANCH#*/}"
+if [ -z "$ISSUE_NUMBER" ]; then
+  while IFS=$'\t' read -r NUM ISSUE_TITLE; do
+    ISSUE_SLUG=$(echo "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g')
+    if [ "$ISSUE_SLUG" = "$BRANCH_SLUG" ]; then
+      ISSUE_NUMBER="$NUM"
+      break
+    fi
+  done < <(gh issue list --state open --limit 200 --json number,title --jq '.[] | "\(.number)\t\(.title)"' 2>/dev/null || true)
+fi
+
 if [ -n "$ISSUE_NUMBER" ]; then
   ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --json state --jq '.state' 2>/dev/null || true)
   if [ "$ISSUE_STATE" = "CLOSED" ]; then
@@ -60,11 +73,12 @@ if [ -n "$EXISTING_PR" ]; then
     fi
   fi
 else
+  TITLE=""
   if [ -n "$ISSUE_NUMBER" ]; then
     TITLE=$(gh issue view "$ISSUE_NUMBER" --json title --jq '.title' 2>/dev/null || true)
   fi
   if [ -z "$TITLE" ]; then
-    TITLE=$(echo "$FROM_BRANCH" | sed -E 's/^[0-9]+-//' | tr '-' ' ' | sed 's/./\u&/')
+    TITLE=$(echo "$BRANCH_SLUG" | sed -E 's/^[0-9]+-//' | tr '-' ' ' | sed 's/./\u&/')
   fi
   echo "Creating PR: \"$TITLE\"..."
   PR_URL=$(gh pr create \
