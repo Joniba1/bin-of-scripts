@@ -28,14 +28,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# If no -t flag was used, treat positional args as the title
-if [ -z "$TITLE" ] && [ ${#POSITIONAL[@]} -gt 0 ]; then
-  TITLE="${POSITIONAL[*]}"
+# First positional arg is the branch prefix; the rest is the title unless -t was used
+PREFIX=""
+if [ ${#POSITIONAL[@]} -gt 0 ]; then
+  PREFIX="${POSITIONAL[0]}"
+  if [ -z "$TITLE" ] && [ ${#POSITIONAL[@]} -gt 1 ]; then
+    TITLE="${POSITIONAL[*]:1}"
+  fi
 fi
 
-if [ -z "$TITLE" ]; then
-  echo "Usage: work \"Issue title\""
-  echo "       work -t \"Issue title\" [-b \"Body\"] [--base \"base-branch\"]"
+if [ -z "$PREFIX" ] || [ -z "$TITLE" ]; then
+  echo "Usage: work <prefix> \"Issue title\""
+  echo "       work <prefix> -t \"Issue title\" [-b \"Body\"] [--base \"base-branch\"]"
+  echo "Example: work feat \"Add upload retry\"  ->  feat/add-upload-retry"
   exit 1
 fi
 
@@ -58,7 +63,7 @@ SLUG=$(
     | sed -E 's/^-|-$//g'
 )
 
-BRANCH_NAME="${ISSUE_NUMBER}-${SLUG}"
+BRANCH_NAME="${PREFIX}/${SLUG}"
 
 echo "Creating branch: $BRANCH_NAME"
 
