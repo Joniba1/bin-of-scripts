@@ -48,6 +48,14 @@ Pushes unpushed local commits before creating the PR if needed. Supports tab com
 merge <branch-to-merge-from> <branch-to-merge-to>
 ```
 
+### `changes`
+
+Summarizes uncommitted changes in the current git repo as a table with per-file `+`/`-` counts, grouped into staged and unstaged (untracked files appear as unstaged additions). With no scope flags, both are shown.
+
+```
+changes [-s|--staged] [-u|--unstaged] [--summary]
+```
+
 ### `killport`
 
 Kills processes using a specific port.

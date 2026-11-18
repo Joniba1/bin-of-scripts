@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+# changes - Summarize uncommitted changes (staged, unstaged) in the current git repo; untracked files count as unstaged additions
+# Usage: changes [-s|--staged] [-u|--unstaged] [--summary]
+# Example: changes -s -u --summary
+# Requires bash >= 4.3
+
+SECTIONS=(staged unstaged)
+
+if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
+    RED=$'\033[31m' GREEN=$'\033[32m' YELLOW=$'\033[33m'
+    BOLD=$'\033[1m' DIM=$'\033[2m' NC=$'\033[0m'
+else
+    RED= GREEN= YELLOW= BOLD= DIM= NC=
+fi
+
+die() {
+    printf '%s%s%s\n' "$RED" "$1" "$NC" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: changes [-s|--staged] [-u|--unstaged] [--summary]
+
+With no scope flags, staged and unstaged changes are both shown.
+  -s, --staged      staged changes
+  -u, --unstaged    unstaged changes, including untracked files (shown as A)
+  --summary         show per-section totals only
+EOF
+}
+
+# Parse flags
+show_staged=0
+show_unstaged=0
+summary=0
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s|--staged) show_staged=1 ;;
+        -u|--unstaged) show_unstaged=1 ;;
+        --summary) summary=1 ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *) die "Invalid argument: $1" ;;
+    esac
+    shift
+done
+
+if (( ! show_staged && ! show_unstaged )); then
+    show_staged=1 show_unstaged=1
+fi
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || die "Not inside a git repository"
+cd "$root" || exit 1
+
+# Row format (tab separated): status, added, deleted, path
+declare -a rows_staged=() rows_unstaged=()
+declare -A num_staged=() num_unstaged=()
+
+make_row() {
+    printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "$4"
+}
+
+load_numstat() {
+    local -n map=$1
+    shift
+    local add del path
+    while IFS=$'\t' read -r -d '' add del path; do
+        map[$path]="$add"$'\t'"$del"
+    done < <(git diff --numstat -z --no-renames "$@")
+}
+
+# Prints "added<TAB>deleted"; "-" for binary files
+untracked_numstat() {
+    local file=$1
+    if [[ ! -f $file || ! -s $file ]]; then
+        printf '0\t0'
+    elif grep -qI '^' -- "$file"; then
+        printf '%s\t0' "$(grep -c '' -- "$file")"
+    else
+        printf -- '-\t-'
+    fi
+}
+
+(( show_staged )) && load_numstat num_staged --cached
+(( show_unstaged )) && load_numstat num_unstaged
+
+while IFS= read -r -d '' entry; do
+    x=${entry:0:1}
+    y=${entry:1:1}
+    path=${entry:3}
+
+    if [[ $x == '?' ]]; then
+        (( show_unstaged )) || continue
+        IFS=$'\t' read -r add del <<<"$(untracked_numstat "$path")"
+        rows_unstaged+=("$(make_row A "$add" "$del" "$path")")
+        continue
+    fi
+
+    if (( show_staged )) && [[ $x != ' ' ]]; then
+        IFS=$'\t' read -r add del <<<"${num_staged[$path]:-0$'\t'0}"
+        rows_staged+=("$(make_row "$x" "$add" "$del" "$path")")
+    fi
+    if (( show_unstaged )) && [[ $y != ' ' ]]; then
+        IFS=$'\t' read -r add del <<<"${num_unstaged[$path]:-0$'\t'0}"
+        rows_unstaged+=("$(make_row "$y" "$add" "$del" "$path")")
+    fi
+done < <(git status --porcelain=v1 -z --no-renames --untracked-files=all)
+
+# Path order keeps untracked files interleaved with tracked ones
+sort_section() {
+    local -n rows=rows_$1
+    (( ${#rows[@]} )) || return
+    local sorted
+    mapfile -t sorted < <(printf '%s\n' "${rows[@]}" | sort -t $'\t' -k4)
+    rows=("${sorted[@]}")
+}
+
+declare -A files_of=() add_of=() del_of=() seen=()
+max_path=0 w_add=1 w_del=1
+
+tally_section() {
+    local s=$1 row st add del path
+    local -n rows=rows_$s
+    files_of[$s]=${#rows[@]}
+    add_of[$s]=0
+    del_of[$s]=0
+    for row in "${rows[@]}"; do
+        IFS=$'\t' read -r st add del path <<<"$row"
+        seen[$path]=1
+        (( ${#path} > max_path )) && max_path=${#path}
+        (( ${#add} > w_add )) && w_add=${#add}
+        (( ${#del} > w_del )) && w_del=${#del}
+        if [[ $add =~ ^[0-9]+$ ]]; then
+            add_of[$s]=$(( ${add_of[$s]} + add ))
+            del_of[$s]=$(( ${del_of[$s]} + del ))
+        fi
+    done
+}
+
+sum_files=0 sum_add=0 sum_del=0
+for s in "${SECTIONS[@]}"; do
+    sort_section "$s"
+    tally_section "$s"
+    sum_files=$((sum_files + ${files_of[$s]}))
+    sum_add=$((sum_add + ${add_of[$s]}))
+    sum_del=$((sum_del + ${del_of[$s]}))
+done
+total_files=${#seen[@]}
+
+if (( total_files == 0 )); then
+    printf '%sNo changes%s\n' "$GREEN" "$NC"
+    exit 0
+fi
+
+sw_files=${#sum_files}
+sw_add=${#sum_add}
+sw_del=${#sum_del}
+
+cols=$(tput cols 2>/dev/null)
+[[ $cols =~ ^[0-9]+$ ]] || cols=80
+fixed=$((8 + w_add + w_del))
+path_w=$((cols - fixed))
+(( path_w > max_path )) && path_w=$max_path
+min_w=$(( max_path < 12 ? max_path : 12 ))
+(( min_w < 4 )) && min_w=4
+(( path_w < min_w )) && path_w=$min_w
+
+rule() {
+    local line
+    printf -v line '%*s' "$1" ''
+    printf ' %s%s%s\n' "$DIM" "${line// /─}" "$NC"
+}
+
+summary_line() {
+    local label=$1 lc=$2 files=$3 add=$4 del=$5 noun=files ac=$GREEN dc=$RED
+    (( files == 1 )) && noun=file
+    (( add == 0 )) && ac=$DIM
+    (( del == 0 )) && dc=$DIM
+    printf ' %s%-8s%s %*d %-5s  %s%*s%s  %s%*s%s\n' \
+        "$lc" "$label" "$NC" "$sw_files" "$files" "$noun" \
+        "$ac" "$((sw_add + 1))" "+$add" "$NC" "$dc" "$((sw_del + 1))" "-$del" "$NC"
+}
+
+render_section() {
+    local s=$1 label=$2 color=$3 row st add del path shown sc ac dc
+    local -n rows=rows_$s
+    (( ${#rows[@]} )) || return
+
+    echo
+    summary_line "$label" "$color" "${files_of[$s]}" "${add_of[$s]}" "${del_of[$s]}"
+    printf ' %s%s  %-*s  %*s  %*s%s\n' \
+        "$DIM" " " "$path_w" "File" "$w_add" "+" "$w_del" "-" "$NC"
+    rule $((fixed + path_w - 1))
+
+    for row in "${rows[@]}"; do
+        IFS=$'\t' read -r st add del path <<<"$row"
+        shown=$path
+        (( ${#shown} > path_w )) && shown="...${shown: -$((path_w - 3))}"
+
+        case $st in
+            A) sc=$GREEN ;;
+            D|U) sc=$RED ;;
+            *) sc=$YELLOW ;;
+        esac
+        ac=$GREEN dc=$RED
+        if [[ $add =~ ^[0-9]+$ ]]; then
+            (( add == 0 )) && ac=$DIM
+            (( del == 0 )) && dc=$DIM
+        else
+            ac=$DIM dc=$DIM
+        fi
+
+        printf ' %s%s%s  %-*s  %s%*s%s  %s%*s%s\n' \
+            "$sc" "$st" "$NC" "$path_w" "$shown" \
+            "$ac" "$w_add" "$add" "$NC" "$dc" "$w_del" "$del" "$NC"
+    done
+}
+
+declare -A labels=([staged]=Staged [unstaged]=Unstaged)
+declare -A colors=([staged]=$GREEN [unstaged]=$YELLOW)
+
+if (( summary )); then
+    echo
+    for s in "${SECTIONS[@]}"; do
+        (( ${files_of[$s]} )) || continue
+        summary_line "${labels[$s]}" "${colors[$s]}" "${files_of[$s]}" "${add_of[$s]}" "${del_of[$s]}"
+    done
+    rule $((1 + 8 + 1 + sw_files + 1 + 5 + 2 + 1 + sw_add + 2 + 1 + sw_del))
+else
+    for s in "${SECTIONS[@]}"; do
+        render_section "$s" "${labels[$s]}" "${colors[$s]}"
+    done
+    echo
+fi
+
+summary_line "Total" "$BOLD" "$total_files" "$sum_add" "$sum_del"
